@@ -1,0 +1,1363 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Cafe in the Rain · 雨夜咖啡</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#0a0a12; touch-action:none;
+    font-family:"Hiragino Sans","Yu Gothic","PingFang SC","Noto Sans JP",-apple-system,sans-serif;
+    user-select:none; -webkit-user-select:none; }
+  #app { position:fixed; inset:0; touch-action:none; }
+  canvas { display:block; }
+
+  /* ---------- loading / enter screen ---------- */
+  #loading { position:fixed; inset:0; z-index:50; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; text-align:center;
+    background:radial-gradient(ellipse at 50% 62%, #1d1226 0%, #0a0a12 72%); color:#e8dcc8;
+    transition:opacity 1s ease; }
+  #loading.hide { opacity:0; pointer-events:none; }
+  #loading h1 { font-size:clamp(30px,5.4vw,46px); font-weight:600; letter-spacing:10px; text-indent:10px;
+    margin-bottom:8px; text-shadow:0 0 28px rgba(255,157,77,.5), 0 0 80px rgba(255,80,80,.2); }
+  #loading .sub { font-size:12px; color:#9a8fa8; letter-spacing:8px; text-indent:8px; margin-bottom:46px; }
+  #enterBtn { padding:15px 52px; font-size:15px; letter-spacing:8px; text-indent:8px; color:#221204;
+    background:linear-gradient(135deg,#ffd9a0,#ff9d4d); border:none; border-radius:999px; cursor:pointer;
+    box-shadow:0 0 34px rgba(255,157,77,.35); transition:transform .2s, box-shadow .2s; }
+  #enterBtn:hover { transform:translateY(-2px); box-shadow:0 8px 44px rgba(255,157,77,.55); }
+  #loading .ctrl { margin-top:36px; font-size:12px; color:#6f6a80; line-height:2; }
+  #loadErr { color:#ff8080; font-size:13px; margin-top:18px; display:none; }
+
+  /* ---------- HUD ---------- */
+  #hud { position:fixed; inset:0; z-index:20; pointer-events:none; opacity:0; transition:opacity .9s; }
+  #hud.show { opacity:1; }
+  #brand { position:absolute; left:16px; top:calc(14px + env(safe-area-inset-top)); font-size:11px;
+    letter-spacing:3px; color:rgba(232,220,200,.4); }
+  #crosshair { position:absolute; left:50%; top:50%; width:4px; height:4px; margin:-2px;
+    border-radius:50%; background:rgba(255,255,255,.55); display:none; }
+  #hint { position:absolute; left:50%; bottom:11%; transform:translateX(-50%); white-space:nowrap;
+    font-size:12.5px; letter-spacing:2px; color:rgba(232,220,200,.78);
+    background:rgba(10,10,18,.5); padding:8px 18px; border-radius:999px; backdrop-filter:blur(6px);
+    transition:opacity .5s; }
+  @media (max-width: 620px) { #hint { display:none; } } /* keyboard hint is meaningless on narrow/touch screens */
+  #panel { position:absolute; right:14px; bottom:calc(14px + env(safe-area-inset-bottom));
+    display:flex; flex-direction:column; gap:8px; align-items:flex-end; }
+  .btnrow { display:flex; gap:6px; }
+  .btn { pointer-events:auto; border:1px solid rgba(255,255,255,.14); background:rgba(12,12,22,.62);
+    backdrop-filter:blur(8px); color:#cfc8dd; font-size:12.5px; padding:7px 11px; border-radius:10px;
+    cursor:pointer; transition:all .18s; -webkit-tap-highlight-color:transparent; font-family:inherit; }
+  .btn.active { background:rgba(255,157,77,.18); border-color:rgba(255,157,77,.6); color:#ffd9a8; }
+  .btn:active { transform:scale(.94); }
+
+  /* ---------- virtual joystick ---------- */
+  #joy { position:absolute; left:24px; bottom:calc(30px + env(safe-area-inset-bottom));
+    width:118px; height:118px; border-radius:50%; border:1.5px solid rgba(255,255,255,.2);
+    background:rgba(12,12,22,.35); pointer-events:auto; display:none; touch-action:none; }
+  #joyStick { position:absolute; left:50%; top:50%; width:52px; height:52px; margin:-26px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, #574f68, #2a2536); border:1px solid rgba(255,255,255,.25); }
+  body.touch #joy { display:block; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div id="hud">
+  <div id="brand">CAFE IN THE RAIN · 雨夜咖啡</div>
+  <div id="crosshair"></div>
+  <div id="hint">点击锁定视角（或按住拖拽）· WASD 移动 · Shift 奔跑 · ESC 释放</div>
+  <div id="joy"><div id="joyStick"></div></div>
+  <div id="panel">
+    <div class="btnrow" id="rowTime">
+      <button class="btn active" data-time="dusk">🌇 黄昏</button>
+      <button class="btn" data-time="night">🌙 深夜</button>
+    </div>
+    <div class="btnrow" id="rowWeather">
+      <button class="btn" data-weather="none">🌤 停雨</button>
+      <button class="btn active" data-weather="light">🌧 小雨</button>
+      <button class="btn" data-weather="heavy">⛈ 暴雨</button>
+    </div>
+    <div class="btnrow">
+      <button class="btn" id="resetBtn">📍 回起点</button>
+      <button class="btn" id="audioBtn">🔊 音效开</button>
+    </div>
+  </div>
+</div>
+
+<div id="loading">
+  <h1>雨夜咖啡</h1>
+  <div class="sub">CAFE IN THE RAIN</div>
+  <button id="enterBtn">进 入 雨 夜</button>
+  <div class="ctrl" id="ctrlHint">桌面：点击画面锁定鼠标（或按住拖拽）· WASD 移动 · Shift 奔跑<br>移动端：左侧摇杆移动 · 右侧滑动视角</div>
+  <div id="loadErr">资源加载失败 —— Three.js 需要联网加载（CDN），请检查网络后刷新。</div>
+</div>
+
+<script>
+  // module script failing to load (offline / CDN blocked) -> show error after grace period
+  setTimeout(function(){ if (!window.__sceneReady) document.getElementById('loadErr').style.display='block'; }, 10000);
+</script>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+try {
+
+// ===== CONFIG =====
+const isTouch   = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+const ua = navigator.userAgent;
+const isMobile  = /Android|iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const RAIN_COUNT = isMobile ? 3000 : 8000;
+const DRIP_COUNT = 70;
+const CFG = { eyeH: 1.62, walkSpeed: 3.1, runSpeed: 5.6, transDur: 2.0 };
+
+const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
+const C  = (h) => new THREE.Color(h);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+if (isTouch) document.body.classList.add('touch');
+
+// ===== SHADERS =====
+const NOISE_GLSL = `
+float hash12(vec2 p){ vec3 p3 = fract(vec3(p.xyx)*0.1031); p3 += dot(p3, p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+float vnoise(vec2 p){
+  vec2 i = floor(p); vec2 f = fract(p);
+  vec2 u = f*f*(3.0-2.0*f);
+  return mix( mix(hash12(i),             hash12(i+vec2(1.0,0.0)), u.x),
+              mix(hash12(i+vec2(0.0,1.0)), hash12(i+vec2(1.0,1.0)), u.x), u.y );
+}`;
+
+// -- rain (instanced line segments, wrapped volume that follows the camera) --
+const RAIN_VERT = `
+attribute vec3 aOffset;
+attribute vec3 aSeed;
+uniform float uTime, uSpeed, uLen, uWind;
+uniform vec3 uCenter, uBox;
+varying float vA;
+void main(){
+  vec3 p = position;
+  p.y *= uLen * (0.7 + 0.6*aSeed.y) * (1.0 + uSpeed*0.012); // velocity-stretched streaks — rain never reads as dots
+  float sp = uSpeed * (0.75 + 0.5*aSeed.x);
+  vec3 rel = aOffset + vec3(uTime*uWind*0.6, -uTime*sp, 0.0);
+  rel -= uCenter;
+  rel = mod(rel + uBox*0.5, uBox) - uBox*0.5;
+  vec3 world = rel + uCenter;
+  world.x -= position.y * uWind * 0.045;
+  float yW = rel.y + uCenter.y;
+  float d = length(rel);
+  vA = smoothstep(0.25, 0.9, d)
+     * smoothstep(0.0, 1.1, yW)
+     * (1.0 - smoothstep(8.2, 10.0, yW))
+     * (0.45 + 0.55*aSeed.z);
+  gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
+}`;
+const RAIN_FRAG = `
+uniform float uOpacity;
+varying float vA;
+void main(){ gl_FragColor = vec4(0.60, 0.66, 0.78, vA * uOpacity); }`;
+
+// -- puddle (pseudo reflection: env cubemap + noise normals + rain ripple rings) --
+const PUDDLE_VERT = `
+uniform float uSeed;
+varying vec2 vP;
+varying float vEdge;
+varying float vR;
+varying vec3 vWorld;
+${NOISE_GLSL}
+void main(){
+  vP = uv*2.0-1.0;
+  float ang = atan(vP.y, vP.x);
+  vec2 dir = vec2(cos(ang), sin(ang));
+  float wob = 0.78 + 0.30*vnoise(dir*2.2 + uSeed*7.3) + 0.12*vnoise(dir*4.5 - uSeed*3.1);
+  float r = length(vP)/max(wob, 0.2);
+  vR = r;
+  vEdge = 1.0 - smoothstep(0.5, 1.0, r);
+  vec3 pos = position;
+  pos.x *= wob; pos.y *= wob;
+  vec4 wp = modelMatrix * vec4(pos, 1.0);
+  vWorld = wp.xyz;
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}`;
+const PUDDLE_FRAG = `
+uniform samplerCube uEnv;
+uniform float uTime, uRipple, uSeed;
+varying vec2 vP;
+varying float vEdge;
+varying float vR;
+varying vec3 vWorld;
+${NOISE_GLSL}
+void main(){
+  float n1 = vnoise(vP*2.4 + uTime*0.20 + uSeed);
+  float n2 = vnoise(vP*4.1 - uTime*0.14 + uSeed*1.7 + 11.3);
+  vec2 slope = vec2(n1-0.5, n2-0.5) * 0.32;
+  if (uRipple > 0.004) {
+    for (int i = 0; i < 3; i++) {
+      float fi = float(i);
+      float h1 = hash12(vec2(fi*3.17 + uSeed, uSeed*1.3));
+      float h2 = hash12(vec2(uSeed + fi*7.7, fi*1.9));
+      vec2 c = (vec2(h1, h2) - 0.5) * 1.25;
+      float ph = fract(uTime*(0.5 + 0.25*h1) + h2);
+      float d = length(vP - c);
+      float r = 0.15 + ph*0.85;
+      float band = smoothstep(r-0.10, r-0.02, d) * (1.0 - smoothstep(r+0.01, r+0.06, d));
+      slope += (vP - c)/max(d, 0.05) * band * (1.0-ph) * 0.55 * uRipple;
+    }
+  }
+  vec3 n = normalize(vec3(slope.x, 1.0, -slope.y));
+  vec3 V = normalize(vWorld - cameraPosition);
+  vec3 R = reflect(V, n);
+  R.y = abs(R.y) + 0.03;
+  vec3 refl = textureCube(uEnv, R).rgb;
+  float fres = pow(1.0 - clamp(dot(-V, n), 0.0, 1.0), 2.0);
+  vec3 col = mix(vec3(0.02, 0.026, 0.038), refl, clamp(0.72 + 0.35*fres, 0.0, 1.0));
+  col *= mix(1.0, 0.25, smoothstep(0.8, 1.0, vR)); // darker rim — gives the puddle a readable outline
+  gl_FragColor = vec4(col, vEdge * 0.92);
+}`;
+
+// -- gradient sky dome --
+const SKY_VERT = `
+varying vec3 vDir;
+void main(){
+  vDir = normalize(position);
+  gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
+}`;
+const SKY_FRAG = `
+uniform vec3 uTop, uBottom;
+varying vec3 vDir;
+void main(){
+  float h = clamp(vDir.y, 0.0, 1.0);
+  gl_FragColor = vec4(mix(uBottom, uTop, pow(h, 0.7)), 1.0);
+}`;
+
+// -- vignette + film grain (post) --
+const VignetteShader = {
+  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tDiffuse;
+    uniform float uTime;
+    varying vec2 vUv;
+    float hh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    void main(){
+      vec4 c = texture2D(tDiffuse, vUv);
+      float d = distance(vUv, vec2(0.5, 0.45));
+      c.rgb *= mix(1.0, 0.45, smoothstep(0.42, 0.95, d));
+      c.rgb += (hh(vUv*913.7 + fract(uTime)*57.1) - 0.5) * 0.014;
+      gl_FragColor = c;
+    }`
+};
+
+// ===== RENDERER / SCENE / POST =====
+const app = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+const PR = Math.min(window.devicePixelRatio || 1, isMobile ? 1.35 : 2);
+renderer.setPixelRatio(PR);
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+app.appendChild(renderer.domElement);
+const canvas = renderer.domElement;
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x221428, 0.03);
+
+const camera = new THREE.PerspectiveCamera(62, innerWidth/innerHeight, 0.1, 200);
+camera.rotation.order = 'YXZ';
+
+const composer = new EffectComposer(renderer);
+composer.setPixelRatio(PR);
+composer.setSize(innerWidth, innerHeight);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.95, 0.35, 0.75);
+composer.addPass(bloom);
+const vignettePass = new ShaderPass(VignetteShader);
+composer.addPass(vignettePass);
+composer.addPass(new OutputPass());
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+});
+
+// ===== MATERIAL HELPERS =====
+function M(geo, mat, x, y, z, rx = 0, ry = 0, rz = 0) {
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x, y, z);
+  m.rotation.set(rx, ry, rz);
+  m.castShadow = m.receiveShadow = true;
+  return m;
+}
+
+// procedural brick/stain wall shader (no textures) — patch MeshStandardMaterial
+function makeWallMaterial(color, tileX, tileY, opts = {}) {
+  const m = new THREE.MeshStandardMaterial({ color, roughness: 0.92, metalness: 0.0 });
+  m.defines = { USE_UV: '' };
+  const uni = {
+    uTiling: { value: new THREE.Vector2(tileX, tileY) },
+    uGrime:  { value: opts.grime !== undefined ? opts.grime : 1.0 },
+  };
+  m.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, uni);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec2 uTiling;\nuniform float uGrime;\n' + NOISE_GLSL)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+{
+  vec2 bt = vUv * uTiling;
+  float row = floor(bt.y);
+  float bx = bt.x + mod(row, 2.0)*0.5;
+  vec2 bc = fract(vec2(bx, bt.y));
+  float mx = smoothstep(0.02, 0.10, bc.x) * (1.0 - smoothstep(0.90, 0.98, bc.x));
+  float my = smoothstep(0.02, 0.10, bc.y) * (1.0 - smoothstep(0.90, 0.98, bc.y));
+  float mortar = mx * my;
+  float tone = 0.82 + 0.36*hash12(vec2(floor(bx), row));
+  vec3 brick = diffuseColor.rgb * tone;
+  float grime = smoothstep(0.0, 0.28, vUv.y);
+  diffuseColor.rgb = mix(brick*0.5, brick, mortar) * mix(1.0, 0.55 + 0.45*grime, uGrime);
+  diffuseColor.rgb *= 0.9 + 0.2*vnoise(bt*0.35);
+}`);
+  };
+  return m;
+}
+
+// ===== GEOMETRY BUILDERS =====
+const matCable   = new THREE.MeshStandardMaterial({ color: 0x0d0d10, roughness: 0.6 });
+const matMetal   = new THREE.MeshStandardMaterial({ color: 0x1f2126, roughness: 0.45, metalness: 0.65 });
+const matWood    = new THREE.MeshStandardMaterial({ color: 0x4a3020, roughness: 0.8 });
+const matWoodL   = new THREE.MeshStandardMaterial({ color: 0x5a4028, roughness: 0.6 });
+const matLeaf    = new THREE.MeshStandardMaterial({ color: 0x1d331f, roughness: 1.0 });
+const matPot     = new THREE.MeshStandardMaterial({ color: 0x74463a, roughness: 0.9 });
+const matPole    = new THREE.MeshStandardMaterial({ color: 0x17181c, roughness: 0.55, metalness: 0.5 });
+const matFrame   = new THREE.MeshStandardMaterial({ color: 0x241a12, roughness: 0.7 });
+const matBacking = new THREE.MeshStandardMaterial({ color: 0x0e0e12, roughness: 0.7 });
+
+// ground (asphalt speckle via tiny runtime canvas, no external files)
+function asphaltTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#151518'; g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 9000; i++) {
+    const v = 18 + Math.random()*40;
+    g.fillStyle = 'rgba(' + v + ',' + v + ',' + (v+5) + ',' + (0.2 + Math.random()*0.5) + ')';
+    g.fillRect(Math.random()*256, Math.random()*256, 1.4, 1.4);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(7, 38);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const ground = M(new THREE.PlaneGeometry(15, 78),
+  new THREE.MeshStandardMaterial({ map: asphaltTexture(), roughness: 0.2, metalness: 0.25 }),
+  0, 0, 0, -Math.PI/2);
+ground.castShadow = false;
+scene.add(ground);
+scene.add(M(new THREE.BoxGeometry(0.18, 0.05, 60), new THREE.MeshStandardMaterial({ color: 0x1d1d22, roughness: 0.9 }), -2.82, 0.025, 0));
+scene.add(M(new THREE.BoxGeometry(0.18, 0.05, 60), new THREE.MeshStandardMaterial({ color: 0x1d1d22, roughness: 0.9 }),  2.82, 0.025, 0));
+
+// sky dome
+const skyU = { uTop: { value: C(0x2d1b3d) }, uBottom: { value: C(0x5a2b45) } };
+const sky = new THREE.Mesh(new THREE.SphereGeometry(120, 24, 16),
+  new THREE.ShaderMaterial({ uniforms: skyU, vertexShader: SKY_VERT, fragmentShader: SKY_FRAG,
+    side: THREE.BackSide, depthWrite: false }));
+sky.renderOrder = -1;
+scene.add(sky);
+
+// buildings (left / right row; hand-tuned to abut with no gaps)
+const BUILDINGS = [
+  { s:-1, h:12, z:-21.5, d:13, c:0x2a2732 },
+  { s:-1, h:15, z:  2.0, d:12, c:0x272230 },
+  { s:-1, h:11, z: 16.0, d:16, c:0x232028 },
+  { s:-1, h:14, z: 29.0, d:10, c:0x252130 },
+  { s: 1, h:10, z:-21.0, d:12, c:0x2b2630 },
+  { s: 1, h:14, z:-10.0, d:10, c:0x292430 },
+  { s: 1, h: 9, z: -0.5, d: 9, c:0x262330 },
+  { s: 1, h:11, z:  8.5, d: 9, c:0x2a2530 },
+  { s: 1, h:13, z: 21.5, d:17, c:0x282430 },
+];
+BUILDINGS.forEach(b => {
+  const w = 8;
+  const mat = makeWallMaterial(b.c, b.d/0.62, b.h/0.34);
+  scene.add(M(new THREE.BoxGeometry(w, b.h, b.d), mat, b.s*(3 + w/2), b.h/2, b.z));
+});
+// massing slabs behind buildings + alley end caps (block stray sky gaps)
+[[-13, 20], [13, 20]].forEach(([x, h]) => {
+  const m = M(new THREE.BoxGeometry(4, h, 70), new THREE.MeshStandardMaterial({ color: 0x191720, roughness: 1 }), x, h/2, 0);
+  m.castShadow = false;
+  scene.add(m);
+});
+[[-33.5], [33.5]].forEach(([z]) => {
+  const m = M(new THREE.BoxGeometry(30, 16, 3), new THREE.MeshStandardMaterial({ color: 0x141319, roughness: 1 }), 0, 8, z);
+  m.castShadow = false;
+  scene.add(m);
+});
+
+// facade windows (lit ones are HDR so bloom picks them up)
+const litWinMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffb46b).multiplyScalar(1.7), fog: false });
+const darkWinMat = new THREE.MeshStandardMaterial({ color: 0x0b0b10, roughness: 0.35, metalness: 0.45 });
+const winGeo = new THREE.PlaneGeometry(0.52, 0.68);
+const WINDOWS = [
+  [-1,-26,4,1],[-1,-26,7,0],[-1,-23.5,4.5,0],[-1,-23.5,7.5,1],[-1,-19,5,1],[-1,-17,3.8,0],
+  [-1,-1.5,4.5,0],[-1,0.5,4.5,1],[-1,0.5,7.5,0],[-1,3,4.5,0],[-1,3,9,1],[-1,5.8,4.5,1],
+  [-1,11,4,0],[-1,14,4,1],[-1,14,7,0],[-1,16.5,6.8,1],[-1,18,4.2,0],[-1,21,4.2,1],[-1,21,7.2,0],
+  [1,-25.5,4,0],[1,-25.5,7,1],[1,-22,4.5,1],[1,-18.5,4,0],[1,-18.5,7.5,1],
+  [1,-13.8,5.5,1],[1,-13.8,9,0],[1,-6.3,5.5,0],[1,-6.3,9,1],[1,-3.6,3.2,1],[1,-1.5,3.2,0],
+  [1,6,4,0],[1,6,7,1],[1,9.5,4,1],[1,11.8,4,0],[1,16,4.5,0],[1,16,7.5,1],
+  [1,20,4.5,1],[1,22.5,7.5,0],[1,24,4.5,0],[1,24,7.5,1],[1,27,4.5,1],[1,27,7.5,0],
+];
+WINDOWS.forEach(([s, z, y, lit]) => {
+  const m = new THREE.Mesh(winGeo, lit ? litWinMat : darkWinMat);
+  m.position.set(s*2.985, y, z);
+  m.rotation.y = s < 0 ? Math.PI/2 : -Math.PI/2;
+  scene.add(m);
+});
+
+// ---- cafe (left side, x -3 front face, z -15..-4, h 8) ----
+const cafeGroup = new THREE.Group();
+scene.add(cafeGroup);
+const cafeFrontMat = makeWallMaterial(0x3a3128, 5, 5, { grime: 0.55 });
+// body: BackSide box so the interior is visible through the window opening
+const cafeBodyMat = makeWallMaterial(0x33291f, 3, 3, { grime: 0.4 });
+cafeBodyMat.side = THREE.BackSide;
+const cafeBody = new THREE.Mesh(new THREE.BoxGeometry(9.65, 8, 11), cafeBodyMat);
+cafeBody.position.set(-8.175, 4, -9.5);
+cafeBody.receiveShadow = true;
+cafeGroup.add(cafeBody);
+// roof slab
+cafeGroup.add(M(new THREE.BoxGeometry(10.2, 0.28, 11.8), new THREE.MeshStandardMaterial({ color: 0x1b191f, roughness: 0.95 }), -8.2, 8.1, -9.5));
+// front wall built around the window opening (window: z -11.25..-8.75, y 1..3)
+cafeGroup.add(M(new THREE.BoxGeometry(0.3, 1.0, 11.0), cafeFrontMat, -3.15, 0.5, -9.5));
+cafeGroup.add(M(new THREE.BoxGeometry(0.3, 5.0, 11.0), cafeFrontMat, -3.15, 5.5, -9.5));
+cafeGroup.add(M(new THREE.BoxGeometry(0.3, 8.0, 3.75), cafeFrontMat, -3.15, 4.0, -13.125));
+cafeGroup.add(M(new THREE.BoxGeometry(0.3, 8.0, 4.75), cafeFrontMat, -3.15, 4.0, -6.375));
+// window frame + mullions
+const frameMat = matFrame;
+cafeGroup.add(M(new THREE.BoxGeometry(0.1, 0.08, 2.66), frameMat, -2.99, 3.02, -10));
+cafeGroup.add(M(new THREE.BoxGeometry(0.1, 0.08, 2.66), frameMat, -2.99, 0.98, -10));
+cafeGroup.add(M(new THREE.BoxGeometry(0.1, 2.2, 0.08), frameMat, -2.99, 2.0, -11.29));
+cafeGroup.add(M(new THREE.BoxGeometry(0.1, 2.2, 0.08), frameMat, -2.99, 2.0, -8.71));
+cafeGroup.add(M(new THREE.BoxGeometry(0.06, 2.0, 0.05), frameMat, -2.99, 2.0, -10.83));
+cafeGroup.add(M(new THREE.BoxGeometry(0.06, 2.0, 0.05), frameMat, -2.99, 2.0, -9.17));
+cafeGroup.add(M(new THREE.BoxGeometry(0.06, 0.05, 2.5), frameMat, -2.99, 2.0, -10));
+// glass (mobile fallback: plain transparency — transmission is the expensive path)
+const glassMat = isMobile
+  ? new THREE.MeshPhysicalMaterial({ color: 0x8899aa, transparent: true, opacity: 0.22, roughness: 0.06, metalness: 0 })
+  : new THREE.MeshPhysicalMaterial({ color: 0xbfc8d8, transmission: 0.85, roughness: 0.05, metalness: 0, ior: 1.5, thickness: 0.06 });
+const glass = new THREE.Mesh(new THREE.PlaneGeometry(2.5, 2.0), glassMat);
+glass.position.set(-3.02, 2.0, -10);
+glass.rotation.y = Math.PI/2;
+glass.renderOrder = 3;
+cafeGroup.add(glass);
+// door
+cafeGroup.add(M(new THREE.BoxGeometry(0.05, 2.2, 1.05), matWood, -2.985, 1.1, -5.6));
+cafeGroup.add(M(new THREE.BoxGeometry(0.08, 2.3, 0.09), frameMat, -2.99, 1.15, -6.16));
+cafeGroup.add(M(new THREE.BoxGeometry(0.08, 2.3, 0.09), frameMat, -2.99, 1.15, -5.04));
+cafeGroup.add(M(new THREE.SphereGeometry(0.03, 8, 8), matMetal, -2.95, 1.05, -5.28));
+// awning (tilted fabric) + posts
+const awning = M(new THREE.BoxGeometry(1.4, 0.06, 11.0), new THREE.MeshStandardMaterial({ color: 0x38242c, roughness: 0.98 }), -2.4, 3.02, -9.5, 0, 0, -0.18);
+cafeGroup.add(awning);
+cafeGroup.add(M(new THREE.CylinderGeometry(0.02, 0.02, 2.9, 6), matPole, -1.74, 1.45, -12.3));
+cafeGroup.add(M(new THREE.CylinderGeometry(0.02, 0.02, 2.9, 6), matPole, -1.74, 1.45, -6.7));
+// interior: floor, tables, chairs, pendants, counter
+const cafeLight = new THREE.PointLight(0xff9d4d, 55, 18, 2);
+cafeLight.position.set(-7.2, 2.7, -9.5);
+if (!isMobile) {
+  cafeLight.castShadow = true;
+  cafeLight.shadow.mapSize.set(512, 512);
+  cafeLight.shadow.bias = -0.005;
+  cafeLight.shadow.camera.near = 0.3;
+}
+scene.add(cafeLight);
+// weak warm spill just outside the window — the classic light pool on wet ground
+const spill = new THREE.PointLight(0xff9d4d, 9, 7.5, 2);
+spill.position.set(-2.55, 1.7, -10);
+scene.add(spill);
+const cafeFloor = M(new THREE.PlaneGeometry(9.5, 10.6), new THREE.MeshStandardMaterial({ color: 0x4a3320, roughness: 0.7 }), -8.3, 0.02, -9.5, -Math.PI/2);
+cafeFloor.castShadow = false;
+cafeGroup.add(cafeFloor);
+function table(x, z) {
+  const g = new THREE.Group();
+  g.add(M(new THREE.CylinderGeometry(0.45, 0.45, 0.045, 20), matWoodL, 0, 0.75, 0));
+  g.add(M(new THREE.CylinderGeometry(0.035, 0.05, 0.72, 8), matWood, 0, 0.38, 0));
+  g.add(M(new THREE.CylinderGeometry(0.18, 0.2, 0.04, 12), matWood, 0, 0.02, 0));
+  g.position.set(x, 0, z);
+  return g;
+}
+function chair(x, z, ry) {
+  const g = new THREE.Group();
+  g.add(M(new THREE.BoxGeometry(0.42, 0.04, 0.42), matWood, 0, 0.46, 0));
+  g.add(M(new THREE.BoxGeometry(0.42, 0.5, 0.04), matWood, 0, 0.73, -0.19));
+  g.add(M(new THREE.BoxGeometry(0.3, 0.44, 0.3), matWood, 0, 0.23, 0));
+  g.position.set(x, 0, z);
+  g.rotation.y = ry;
+  return g;
+}
+cafeGroup.add(table(-7.6, -8.2), table(-7.6, -11.2));
+cafeGroup.add(chair(-7.6, -7.35, Math.PI), chair(-7.6, -9.05, 0));
+cafeGroup.add(chair(-7.6, -10.35, Math.PI), chair(-7.6, -12.05, 0));
+[-8.2, -11.2].forEach(z => {
+  cafeGroup.add(M(new THREE.CylinderGeometry(0.008, 0.008, 5.2, 4), matPole, -7.6, 5.4, z));
+  cafeGroup.add(M(new THREE.ConeGeometry(0.24, 0.2, 16), matPole, -7.6, 2.72, z, Math.PI, 0, 0));
+  const bulbM = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffd9a0).multiplyScalar(3.0) });
+  cafeGroup.add(M(new THREE.SphereGeometry(0.06, 10, 8), bulbM, -7.6, 2.6, z));
+});
+cafeGroup.add(M(new THREE.BoxGeometry(0.6, 0.95, 4.2), matWood, -12.5, 0.48, -9.5));
+cafeGroup.add(M(new THREE.BoxGeometry(0.5, 0.42, 0.7), matMetal, -12.5, 1.16, -10.3));
+
+// door lamp + blackboard + pots
+const doorLamp = new THREE.PointLight(0xffaa55, 8, 5, 2);
+doorLamp.position.set(-2.8, 2.72, -5.6);
+scene.add(doorLamp);
+scene.add(M(new THREE.SphereGeometry(0.05, 10, 8), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffd9a0).multiplyScalar(2.2) }), -2.82, 2.72, -5.6));
+scene.add(M(new THREE.ConeGeometry(0.11, 0.1, 12), matPole, -2.82, 2.8, -5.6, Math.PI, 0, 0));
+
+function boardTexture() {
+  const c = document.createElement('canvas'); c.width = 192; c.height = 272;
+  const g = c.getContext('2d');
+  g.fillStyle = '#17181a'; g.fillRect(0, 0, 192, 272);
+  g.strokeStyle = 'rgba(255,255,255,0.12)'; g.lineWidth = 6; g.strokeRect(8, 8, 176, 256);
+  g.fillStyle = '#e8e2d4'; g.textAlign = 'center';
+  g.font = '28px "Hiragino Sans","Yu Gothic","Noto Sans JP",sans-serif';
+  g.fillText('本日', 96, 58);
+  g.font = '34px "Hiragino Sans","Yu Gothic","Noto Sans JP",sans-serif';
+  g.fillText('珈琲', 96, 104);
+  g.font = 'italic 20px Georgia,serif';
+  g.fillText('Rainy Blend', 96, 150);
+  g.font = '22px Georgia,serif';
+  g.fillText('¥ 480', 96, 184);
+  g.strokeStyle = '#e8e2d4'; g.lineWidth = 3;
+  g.beginPath(); g.arc(96, 222, 22, 0.15*Math.PI, 0.85*Math.PI); g.stroke();
+  g.beginPath(); g.moveTo(118, 218); g.lineTo(128, 216); g.lineTo(126, 228); g.lineTo(118, 226); g.stroke();
+  g.lineWidth = 2;
+  g.beginPath(); g.moveTo(88, 192); g.bezierCurveTo(84, 200, 92, 204, 88, 212); g.stroke();
+  g.beginPath(); g.moveTo(102, 192); g.bezierCurveTo(98, 200, 106, 204, 102, 212); g.stroke();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+function buildBoard() {
+  const g = new THREE.Group();
+  g.add(M(new THREE.PlaneGeometry(0.62, 0.88), new THREE.MeshBasicMaterial({ map: boardTexture() }), 0, 0.62, 0.012));
+  g.add(M(new THREE.PlaneGeometry(0.62, 0.88), new THREE.MeshStandardMaterial({ color: 0x141416 }), 0, 0.62, -0.012, 0, Math.PI, 0));
+  g.add(M(new THREE.BoxGeometry(0.04, 0.95, 0.03), matWood, -0.3, 0.47, 0, 0, 0, 0.08));
+  g.add(M(new THREE.BoxGeometry(0.04, 0.95, 0.03), matWood, 0.3, 0.47, 0, 0, 0, -0.08));
+  g.position.set(-2.3, 0, -3.4);
+  g.rotation.y = 0.55;
+  return g;
+}
+scene.add(buildBoard());
+function buildPot() {
+  const g = new THREE.Group();
+  g.add(M(new THREE.CylinderGeometry(0.16, 0.115, 0.26, 12), matPot, 0, 0.13, 0));
+  [[0, 0.42, 0, 0.2], [-0.1, 0.34, 0.05, 0.14], [0.09, 0.33, -0.04, 0.13]].forEach(([x, y, z, r]) => {
+    const s = M(new THREE.SphereGeometry(r, 10, 8), matLeaf, x, y, z);
+    s.scale.y = 1.15;
+    g.add(s);
+  });
+  return g;
+}
+const pot1 = buildPot(); pot1.position.set(-2.55, 0, -7.1); scene.add(pot1);
+const pot2 = buildPot(); pot2.position.set(-2.55, 0, -4.15); pot2.rotation.y = 1.3; scene.add(pot2);
+
+// window cup decal — makes the cafe read as a cafe from any distance
+function cupTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.strokeStyle = '#fff'; g.lineWidth = 6; g.lineCap = 'round'; g.lineJoin = 'round';
+  g.beginPath(); g.moveTo(34, 52); g.lineTo(38, 92); g.quadraticCurveTo(64, 104, 90, 92); g.lineTo(94, 52); g.closePath(); g.stroke();
+  g.beginPath(); g.arc(102, 64, 12, -1.2, 1.4); g.stroke();
+  g.lineWidth = 5;
+  g.beginPath(); g.moveTo(52, 40); g.bezierCurveTo(46, 32, 56, 26, 50, 18); g.stroke();
+  g.beginPath(); g.moveTo(70, 40); g.bezierCurveTo(64, 32, 74, 26, 68, 18); g.stroke();
+  return new THREE.CanvasTexture(c);
+}
+const cupMat = new THREE.MeshBasicMaterial({ map: cupTexture(), transparent: true, toneMapped: false, fog: false });
+cupMat.color.setScalar(1.25);
+const cupDecal = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.55), cupMat);
+cupDecal.rotation.y = Math.PI/2;
+cupDecal.position.set(-2.96, 2.3, -10.42);
+cafeGroup.add(cupDecal);
+
+// ---- street lamps (z adjusted off the cafe window line) ----
+const lampGlowMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffd9a8).multiplyScalar(2.4), fog: false });
+function buildLamp(x, z, dir) {
+  const g = new THREE.Group();
+  g.add(M(new THREE.CylinderGeometry(0.045, 0.06, 3.4, 8), matPole, 0, 1.7, 0));
+  g.add(M(new THREE.CylinderGeometry(0.03, 0.03, 0.9, 6), matPole, dir*0.45, 3.38, 0, 0, 0, Math.PI/2));
+  g.add(M(new THREE.BoxGeometry(0.36, 0.09, 0.2), matPole, dir*0.88, 3.36, 0));
+  const glow = new THREE.Mesh(new THREE.CircleGeometry(0.12, 16), lampGlowMat);
+  glow.rotation.x = Math.PI/2;
+  glow.position.set(dir*0.88, 3.3, 0);
+  g.add(glow);
+  const light = new THREE.PointLight(0xffd4a0, 20, 10, 2);
+  light.position.set(dir*0.88, 3.28, 0);
+  g.add(light);
+  g.position.set(x, 0, z);
+  return g;
+}
+scene.add(buildLamp(-2.45, -13, 1));
+scene.add(buildLamp( 2.45,   0, -1));
+scene.add(buildLamp(-2.45,  11, 1));
+scene.add(buildLamp( 2.45,  22, -1)); // lights the back half so looking up-alley isn't empty
+
+// ---- vending machine (right, z = 5) ----
+function vendingTexture() {
+  const c = document.createElement('canvas'); c.width = 128; c.height = 232;
+  const g = c.getContext('2d');
+  g.fillStyle = '#d8dde2'; g.fillRect(0, 0, 128, 232);
+  const cols = ['#d94f43', '#3f7fd1', '#e8a13c', '#f2f2f2', '#59b06a'];
+  for (let r = 0; r < 4; r++) for (let col = 0; col < 3; col++) {
+    g.fillStyle = cols[(r*3 + col) % 5];
+    g.fillRect(8 + col*40, 10 + r*40, 32, 30);
+    g.fillStyle = 'rgba(255,255,255,0.75)';
+    g.fillRect(12 + col*40, 22 + r*40, 24, 4);
+  }
+  g.fillStyle = '#20232a'; g.fillRect(10, 178, 108, 30);
+  g.fillStyle = '#0c0e12'; g.fillRect(16, 214, 96, 10);
+  g.fillStyle = '#9aa3ad'; g.fillRect(100, 160, 16, 14); // coin slot
+  g.fillStyle = '#39404a'; g.fillRect(100, 166, 16, 3);
+  for (let b = 0; b < 3; b++) { g.fillStyle = '#e8b23c'; g.beginPath(); g.arc(18 + b*28, 166, 5, 0, 7); g.fill(); }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+(function buildVending() {
+  const g = new THREE.Group();
+  g.add(M(new THREE.BoxGeometry(0.85, 1.88, 0.72), new THREE.MeshStandardMaterial({ color: 0x23262d, roughness: 0.5, metalness: 0.35 }), 0, 0.94, 0));
+  const panelMat = new THREE.MeshBasicMaterial({ map: vendingTexture() });
+  panelMat.color.setScalar(0.8);
+  g.add(M(new THREE.PlaneGeometry(0.62, 1.35), panelMat, -0.431, 1.12, 0, 0, -Math.PI/2, 0));
+  const stripMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xfff4dd).multiplyScalar(1.5) });
+  g.add(M(new THREE.PlaneGeometry(0.62, 0.1), stripMat, -0.431, 1.86, 0, 0, -Math.PI/2, 0));
+  g.position.set(2.55, 0, 5);
+  scene.add(g);
+  const vendLight = new THREE.PointLight(0xcfe0ff, 2.4, 3.4, 2); // cold glow on the ground in front
+  vendLight.position.set(1.85, 1.2, 5);
+  scene.add(vendLight);
+})();
+
+// ---- bicycle (left, near z -1.2) ----
+(function buildBicycle() {
+  const g = new THREE.Group();
+  const wheel = (z) => { const t = M(new THREE.TorusGeometry(0.32, 0.024, 8, 26), matMetal, 0, 0.33, z); t.rotation.y = Math.PI/2; return t; };
+  g.add(wheel(0.5), wheel(-0.5));
+  const tube = (a, b, r) => {
+    const d = V3().subVectors(b, a);
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, d.length(), 6), matMetal);
+    m.position.copy(a).addScaledVector(d, 0.5);
+    m.quaternion.setFromUnitVectors(V3(0, 1, 0), d.clone().normalize());
+    m.castShadow = true;
+    return m;
+  };
+  const P1 = V3(0, 0.33, 0.5), P2 = V3(0, 0.62, 0.05), P3 = V3(0, 0.33, -0.1), P4 = V3(0, 0.95, -0.28), P5 = V3(0, 0.9, 0.42);
+  g.add(tube(P1, P2, 0.02), tube(P2, P3, 0.02), tube(P3, P4, 0.02), tube(P4, P2, 0.02), tube(P1, P5, 0.02), tube(P5, P2, 0.02));
+  g.add(M(new THREE.BoxGeometry(0.06, 0.05, 0.22), matMetal, 0, 0.99, -0.32));
+  g.add(M(new THREE.CylinderGeometry(0.014, 0.014, 0.4, 6), matMetal, 0, 1.0, 0.52, 0, 0, Math.PI/2));
+  g.position.set(-2.62, 0, -1.2);
+  g.rotation.z = 0.1;
+  g.rotation.y = 0.06;
+  scene.add(g);
+})();
+
+// ---- hanging cables ----
+function cable(z, y0, r) {
+  const curve = new THREE.CatmullRomCurve3([V3(-3, y0 + 0.45, z), V3(-1.5, y0 + 0.1, z), V3(0, y0, z), V3(1.5, y0 + 0.1, z), V3(3, y0 + 0.45, z)]);
+  const m = M(new THREE.TubeGeometry(curve, 24, r, 5, false), matCable, 0, 0, 0);
+  m.castShadow = false;
+  return m;
+}
+scene.add(cable(-8, 5.0, 0.016), cable(-8, 5.15, 0.011), cable(8, 5.0, 0.016), cable(8, 5.15, 0.011));
+// third cable deeper in the alley + paper lanterns (content for the look-back view)
+scene.add(cable(20, 5.0, 0.016), cable(20, 5.15, 0.011));
+const LANTERN_BASE = new THREE.Color(0xffa04d);
+const lanternMat = new THREE.MeshBasicMaterial({ color: LANTERN_BASE.clone().multiplyScalar(1.8), fog: false });
+function lantern(x, y, z, drop) {
+  const g = new THREE.Group();
+  g.add(M(new THREE.CylinderGeometry(0.005, 0.005, drop, 4), matCable, 0, -drop/2, 0));
+  g.add(M(new THREE.CylinderGeometry(0.11, 0.09, 0.26, 10), lanternMat, 0, -drop - 0.13, 0));
+  g.add(M(new THREE.CylinderGeometry(0.035, 0.035, 0.03, 8), matPole, 0, -drop - 0.005, 0));
+  g.add(M(new THREE.CylinderGeometry(0.035, 0.035, 0.03, 8), matPole, 0, -drop - 0.265, 0));
+  g.position.set(x, y, z);
+  return g;
+}
+scene.add(lantern(-1.25, 4.9, 20, 0.35), lantern(0.1, 4.76, 20, 0.5), lantern(1.35, 4.9, 20, 0.35));
+
+// traffic light at the alley mouth (cycling green/amber/red — focal point when looking back)
+const tlRed = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xff3b30).multiplyScalar(0.07) });
+const tlAmb = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffb03b).multiplyScalar(0.07) });
+const tlGrn = new THREE.MeshBasicMaterial({ color: new THREE.Color(0x2fe6a0).multiplyScalar(2.2) });
+const TL_BASE = { r: new THREE.Color(0xff3b30), a: new THREE.Color(0xffb03b), g: new THREE.Color(0x2fe6a0) };
+(function buildTrafficLight() {
+  const g = new THREE.Group();
+  g.add(M(new THREE.BoxGeometry(0.34, 0.95, 0.22), matPole, 0, 4.6, 0));
+  const discGeo = new THREE.CircleGeometry(0.1, 16);
+  const mk = (mat, y) => { const d = new THREE.Mesh(discGeo, mat); d.position.set(0, y, -0.115); d.rotation.y = Math.PI; return d; };
+  g.add(mk(tlRed, 0.31), mk(tlAmb, 0), mk(tlGrn, -0.31));
+  g.position.set(0.8, 0, 31.85);
+  scene.add(g);
+})();
+const tlLight = new THREE.PointLight(0x2fe6a0, 2.5, 7, 2);
+tlLight.position.set(0.8, 4.4, 30.8);
+scene.add(tlLight);
+
+// ---- lived-in street details: AC units, drain pipes, posters, leaves, cardboard ----
+const acGeo = new THREE.BoxGeometry(0.5, 0.26, 0.34);
+[[-2.92, 4.5, -24], [-2.92, 6.5, -19], [-2.92, 5.0, 13.5], [-2.92, 3.8, 19.5],
+ [2.92, 4.0, -16.5], [2.92, 6.0, -2.5], [2.92, 4.5, 15.5], [2.92, 6.2, 24.5]]
+.forEach(([x, y, z]) => scene.add(M(acGeo, matMetal, x, y, z)));
+[[-2.96, 11, -27.8], [2.96, 10, -4.6], [-2.96, 13, 8.1], [2.96, 9, 27.6]].forEach(([x, h, z]) => {
+  const pipe = M(new THREE.CylinderGeometry(0.045, 0.045, h, 6), matPole, x, h/2, z);
+  pipe.castShadow = false;
+  scene.add(pipe);
+});
+function posterTexture(hue) {
+  const c = document.createElement('canvas'); c.width = 128; c.height = 192;
+  const g = c.getContext('2d');
+  g.fillStyle = hue; g.fillRect(0, 0, 128, 192);
+  g.fillStyle = 'rgba(20,16,28,0.85)';
+  g.font = 'bold 30px "Hiragino Sans","Yu Gothic",sans-serif'; g.textAlign = 'center';
+  g.fillText('映画', 64, 52);
+  g.font = '16px sans-serif';
+  g.fillText('雨の夜、喫茶店で', 64, 88);
+  for (let i = 0; i < 5; i++) g.fillRect(24, 116 + i*14, 80 - (i%2)*18, 5);
+  g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = 8; g.strokeRect(0, 0, 128, 192);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+function addPoster(x, z, ry, hue, y) {
+  const mat = new THREE.MeshBasicMaterial({ map: posterTexture(hue) });
+  mat.color.setScalar(0.5);
+  const p = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.93), mat);
+  p.position.set(x, y || 1.85, z);
+  p.rotation.y = ry;
+  scene.add(p);
+}
+addPoster(-2.955, 6.5, Math.PI/2, '#b8434e');
+addPoster(2.955, 17.5, -Math.PI/2, '#3e6fae');
+addPoster(-2.955, 23.0, Math.PI/2, '#c8a24a', 1.7);
+const leafGeo = new THREE.PlaneGeometry(0.14, 0.2);
+const leafCols = [0x6b4423, 0x8a5a2a, 0x4a3319, 0x74502e];
+for (let i = 0; i < 14; i++) {
+  const lm = new THREE.Mesh(leafGeo, new THREE.MeshStandardMaterial({ color: leafCols[i % 4], roughness: 1, side: THREE.DoubleSide }));
+  lm.rotation.set(-Math.PI/2, 0, Math.random()*Math.PI);
+  lm.position.set((Math.random()-0.5)*4.6, 0.008 + Math.random()*0.006, -22 + Math.random()*48);
+  lm.castShadow = false;
+  scene.add(lm);
+}
+const matCard = new THREE.MeshStandardMaterial({ color: 0x6a5236, roughness: 1 });
+scene.add(M(new THREE.BoxGeometry(0.52, 0.36, 0.42), matCard, 2.55, 0.18, 12.6));
+scene.add(M(new THREE.BoxGeometry(0.44, 0.3, 0.38), matCard, 2.5, 0.51, 12.55, 0, 0.4, 0));
+
+// suggestion that the alley continues around the corner (far end): a distant warm glow + lamp silhouette
+(function buildAlleyBend() {
+  const glowMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffb066).multiplyScalar(0.85), fog: false });
+  const glow = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 2.7), glowMat);
+  glow.position.set(1.35, 1.45, -31.9);
+  scene.add(glow);
+  const silhouette = M(new THREE.BoxGeometry(0.09, 3.4, 0.09), matPole, 2.35, 1.7, -31.8);
+  silhouette.castShadow = false;
+  scene.add(silhouette);
+  const bendLight = new THREE.PointLight(0xffb066, 3, 6, 2);
+  bendLight.position.set(1.35, 2.4, -31.2);
+  scene.add(bendLight);
+})();
+
+// ---- neon signs ----
+function textTexture(text, color, vertical, fontPx) {
+  const chars = [...text];
+  const pad = fontPx*0.35;
+  const W = vertical ? fontPx + pad*2 : chars.length*(fontPx*1.15) + pad*2;
+  const H = vertical ? chars.length*(fontPx*1.08) + pad*2 : fontPx + pad*2;
+  const c = document.createElement('canvas'); c.width = Math.round(W); c.height = Math.round(H);
+  const g = c.getContext('2d');
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = 'bold ' + fontPx + 'px "Hiragino Sans","Yu Gothic","Noto Sans JP",sans-serif';
+  g.shadowColor = color;
+  const draw = (fill, blur) => {
+    g.shadowBlur = blur; g.fillStyle = fill;
+    chars.forEach((ch, i) => {
+      const x = vertical ? W/2 : pad + fontPx*0.575 + i*(fontPx*1.15);
+      const y = vertical ? pad + fontPx*0.54 + i*(fontPx*1.08) : H/2;
+      g.fillText(ch, x, y);
+    });
+  };
+  draw(color, fontPx*0.55);
+  draw(color, fontPx*0.3);
+  draw('#ffffff', fontPx*0.08);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+function neonPlane(text, color, w, h, vertical) {
+  const mat = new THREE.MeshBasicMaterial({ map: textTexture(text, color, vertical, 150), transparent: true, toneMapped: false, fog: false }); // fog off — neon must punch through the mist from any distance
+  mat.color.setScalar(2.1);
+  return new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+}
+// 「珈琲」 red, above cafe awning, slow breathing blink
+const coffeeSign = neonPlane('珈琲', '#ff3b30', 2.3, 1.15, false);
+coffeeSign.rotation.y = Math.PI/2;
+coffeeSign.position.set(-2.945, 4.75, -9);
+scene.add(coffeeSign);
+scene.add(M(new THREE.BoxGeometry(0.05, 1.25, 2.45), matBacking, -2.98, 4.75, -9));
+// blade sign projecting from the cafe wall — readable from anywhere down the alley
+(function buildBladeSign() {
+  const g = new THREE.Group();
+  const front = neonPlane('珈琲', '#ff3b30', 0.85, 2.3, true);
+  const back = neonPlane('珈琲', '#ff3b30', 0.85, 2.3, true);
+  back.rotation.y = Math.PI;
+  g.add(front, back);
+  g.add(M(new THREE.BoxGeometry(0.06, 2.45, 0.92), matBacking, 0, 0, 0));
+  g.add(M(new THREE.BoxGeometry(0.55, 0.06, 0.06), matPole, 0.38, 1.28, 0));
+  g.position.set(-2.58, 4.15, -3.6);
+  scene.add(g);
+})();
+// 「ラーメン」 blue-white, vertical on right building
+const ramenSign = neonPlane('ラーメン', '#4da3ff', 0.78, 2.3, true);
+ramenSign.rotation.y = -Math.PI/2;
+ramenSign.position.set(2.945, 4.7, -10);
+scene.add(ramenSign);
+scene.add(M(new THREE.BoxGeometry(0.05, 2.45, 0.95), matBacking, 2.98, 4.7, -10));
+// 「営業中」 green, three separate chars so one can flicker loose contact
+const openMats = ['営', '業', '中'].map(() => {
+  const mat = new THREE.MeshBasicMaterial({ map: textTexture('', '#39d17a', false, 150), transparent: true, toneMapped: false, fog: false });
+  return mat;
+});
+['営', '業', '中'].forEach((ch, i) => {
+  const mat = openMats[i];
+  mat.map = textTexture(ch, '#39d17a', false, 150);
+  mat.color.setScalar(1.6); // 1.9 was too hot up close — bloom washed the green out to white
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.5), mat);
+  m.rotation.y = Math.PI/2;
+  m.position.set(-2.945, 3.3, 2.0 + (1 - i)*0.55);
+  scene.add(m);
+});
+scene.add(M(new THREE.BoxGeometry(0.05, 0.62, 1.78), matBacking, -2.98, 3.3, 2.0));
+// 「スナック」 pink vertical sign deeper in the alley (visible when looking back)
+const snackSign = neonPlane('スナック', '#ff5fd0', 0.85, 2.0, true);
+snackSign.rotation.y = -Math.PI/2;
+snackSign.position.set(2.945, 4.3, 19.5);
+scene.add(snackSign);
+scene.add(M(new THREE.BoxGeometry(0.05, 2.15, 1.0), matBacking, 2.98, 4.3, 19.5));
+
+// ===== LIGHTS =====
+const amb = new THREE.AmbientLight(0x1a1a2e, 0.3);
+scene.add(amb);
+const hemi = new THREE.HemisphereLight(0x4a3560, 0x101018, 0.4);
+scene.add(hemi);
+const moon = new THREE.DirectionalLight(0x5b6ee1, 0.4);
+moon.position.set(9, 20, 5);
+moon.castShadow = true;
+moon.shadow.mapSize.set(isMobile ? 512 : 1024, isMobile ? 512 : 1024);
+moon.shadow.camera.left = -26; moon.shadow.camera.right = 26;
+moon.shadow.camera.top = 26; moon.shadow.camera.bottom = -26;
+moon.shadow.camera.near = 2; moon.shadow.camera.far = 80;
+moon.shadow.bias = -0.0006;
+moon.shadow.normalBias = 0.03;
+scene.add(moon);
+scene.add(moon.target);
+
+// ===== RAIN SYSTEMS =====
+class RainSystem {
+  constructor(count, box, center, speed, len, wind, opacity) {
+    const geo = new THREE.InstancedBufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 1, 0], 3));
+    const off = new Float32Array(count*3), seed = new Float32Array(count*3);
+    for (let i = 0; i < count; i++) {
+      off[i*3]   = (Math.random() - 0.5)*box.x;
+      off[i*3+1] = (Math.random() - 0.5)*box.y;
+      off[i*3+2] = (Math.random() - 0.5)*box.z;
+      seed[i*3] = Math.random(); seed[i*3+1] = Math.random(); seed[i*3+2] = Math.random();
+    }
+    geo.setAttribute('aOffset', new THREE.InstancedBufferAttribute(off, 3));
+    geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seed, 3));
+    geo.instanceCount = count;
+    this.geo = geo;
+    this.uniforms = {
+      uTime: { value: 0 }, uSpeed: { value: speed }, uLen: { value: len }, uWind: { value: wind },
+      uOpacity: { value: opacity }, uCenter: { value: center.clone() }, uBox: { value: box.clone() },
+    };
+    const mat = new THREE.ShaderMaterial({
+      uniforms: this.uniforms, vertexShader: RAIN_VERT, fragmentShader: RAIN_FRAG,
+      transparent: true, depthWrite: false,
+    });
+    this.mesh = new THREE.LineSegments(geo, mat);
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 10;
+    scene.add(this.mesh);
+  }
+  setCount(n) { this.geo.instanceCount = Math.max(0, Math.floor(n)); }
+  update(t) { this.uniforms.uTime.value = t; }
+}
+const rain = new RainSystem(RAIN_COUNT, V3(14, 18, 46), V3(0, CFG.eyeH, 17), 12, 0.3, 0.7, 0.4);
+const drips = new RainSystem(DRIP_COUNT, V3(0.5, 3.0, 10.8), V3(-1.72, 1.5, -9.5), 6.5, 0.16, 0, 0);
+drips.mesh.visible = false;
+
+// ===== PUDDLES + ENV CUBEMAP =====
+const cubeRT = new THREE.WebGLCubeRenderTarget(256, {
+  type: THREE.HalfFloatType, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter,
+});
+const cubeCam = new THREE.CubeCamera(0.2, 150, cubeRT);
+cubeCam.position.set(0, 3, 0);
+scene.add(cubeCam);
+const puddles = [];
+function addPuddle(rx, rz, x, z, seed) {
+  const uni = { uEnv: { value: null }, uTime: { value: 0 }, uRipple: { value: 0.5 }, uSeed: { value: seed } };
+  const mat = new THREE.ShaderMaterial({
+    uniforms: uni, vertexShader: PUDDLE_VERT, fragmentShader: PUDDLE_FRAG,
+    transparent: true, depthWrite: false,
+  });
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(2, 2, 24, 24), mat);
+  m.rotation.x = -Math.PI/2;
+  m.position.set(x, 0.012 + Math.random()*0.004, z);
+  m.scale.set(rx, rz, 1);
+  m.renderOrder = 2;
+  scene.add(m);
+  puddles.push({ mesh: m, uni });
+}
+addPuddle(1.3, 0.9, -0.7, -7, 3.1);
+addPuddle(1.1, 0.8,  0.9,  1.8, 7.7);
+addPuddle(1.0, 1.3,  0.3, -13, 12.3);
+addPuddle(1.2, 0.9, -0.4,  9.0, 5.9);
+addPuddle(1.0, 0.8,  0.7, 19.0, 9.4);
+addPuddle(0.9, 0.7,  1.45, -0.3, 2.6);
+addPuddle(1.0, 0.75, -1.3, -6.1, 8.2);
+// one big mirror puddle under every street lamp — each reflects its own warm halo
+addPuddle(1.7, 1.15, -1.62, -13, 4.4);
+addPuddle(1.7, 1.15,  1.62,   0, 3.3);
+addPuddle(1.7, 1.15, -1.62,  11, 6.6);
+addPuddle(1.7, 1.15,  1.62,  22, 1.9);
+let envPending = false;
+function captureEnv() {
+  rain.mesh.visible = false;
+  drips.mesh.visible = false;
+  const vis = puddles.map(p => p.mesh.visible);
+  puddles.forEach(p => p.mesh.visible = false);
+  cubeCam.update(renderer, scene);
+  puddles.forEach((p, i) => { p.mesh.visible = vis[i]; p.uni.uEnv.value = cubeRT.texture; });
+  scene.environment = cubeRT.texture; // IBL from the captured scene — wet-look reflections on standard materials
+  rain.mesh.visible = P.rain > 0.01;
+  drips.mesh.visible = P.rain > 0.06;
+}
+
+// ===== AUDIO (fully procedural, Web Audio) =====
+class AudioSys {
+  constructor() { this.ready = false; this.enabled = true; this.mix = { rain: 0.08, hiss: 0.015, lfo: 70 }; }
+  init() {
+    if (this.ready) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    const ctx = this.ctx = new AC();
+    if (ctx.state === 'suspended') ctx.resume();
+    this.master = ctx.createGain();
+    this.master.gain.value = 1;
+    this.master.connect(ctx.destination);
+    const len = ctx.sampleRate*2;
+    const wb = ctx.createBuffer(1, len, ctx.sampleRate);
+    const wd = wb.getChannelData(0);
+    for (let i = 0; i < len; i++) wd[i] = Math.random()*2 - 1;
+    const bb = ctx.createBuffer(1, len, ctx.sampleRate);
+    const bd = bb.getChannelData(0);
+    let l = 0;
+    for (let i = 0; i < len; i++) { const w = Math.random()*2 - 1; l = (l + 0.02*w)/1.02; bd[i] = l*3.5; }
+    this.white = wb; this.brown = bb;
+    const loop = (buf) => { const s = ctx.createBufferSource(); s.buffer = buf; s.loop = true; s.start(); return s; };
+    // rain body
+    this.rainBP = ctx.createBiquadFilter();
+    this.rainBP.type = 'bandpass'; this.rainBP.frequency.value = 2000; this.rainBP.Q.value = 0.5;
+    this.rainG = ctx.createGain(); this.rainG.gain.value = 0;
+    loop(wb).connect(this.rainBP); this.rainBP.connect(this.rainG); this.rainG.connect(this.master);
+    // rain on surfaces (hiss)
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 3000;
+    this.hissG = ctx.createGain(); this.hissG.gain.value = 0;
+    loop(wb).connect(hp); hp.connect(this.hissG); this.hissG.connect(this.master);
+    // wind LFO on the rain bandpass (heavy rain)
+    this.lfo = ctx.createOscillator(); this.lfo.frequency.value = 0.23;
+    this.lfoG = ctx.createGain(); this.lfoG.gain.value = 0;
+    this.lfo.connect(this.lfoG); this.lfoG.connect(this.rainBP.frequency); this.lfo.start();
+    // distant city hum
+    const alp = ctx.createBiquadFilter();
+    alp.type = 'lowpass'; alp.frequency.value = 150;
+    const ag = ctx.createGain(); ag.gain.value = 0.02;
+    loop(bb).connect(alp); alp.connect(ag); ag.connect(this.master);
+    // reverb for thunder
+    this.conv = ctx.createConvolver();
+    const irLen = ctx.sampleRate*2;
+    const ir = ctx.createBuffer(2, irLen, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = ir.getChannelData(ch);
+      for (let i = 0; i < irLen; i++) d[i] = (Math.random()*2 - 1)*Math.pow(1 - i/irLen, 2.2);
+    }
+    this.conv.buffer = ir;
+    this.conv.connect(this.master);
+    this.ready = true;
+    this.setMix(this.mix, true);
+  }
+  setMix(m, instant) {
+    this.mix = m;
+    if (!this.ready) return;
+    const t = this.ctx.currentTime, tc = instant ? 0.01 : 0.7;
+    this.rainG.gain.setTargetAtTime(m.rain, t, tc);
+    this.hissG.gain.setTargetAtTime(m.hiss, t, tc);
+    this.lfoG.gain.setTargetAtTime(m.lfo, t, tc);
+  }
+  thunder() {
+    if (!this.ready || !this.enabled) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const s = ctx.createBufferSource();
+    s.buffer = this.brown; s.loop = true;
+    s.playbackRate.value = 0.6 + Math.random()*0.5;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 80 + Math.random()*60; lp.Q.value = 0.7;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.3 + Math.random()*0.15, t + 0.1);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 2.6 + Math.random());
+    s.connect(lp); lp.connect(g);
+    g.connect(this.master); g.connect(this.conv);
+    s.start(t); s.stop(t + 4.2);
+  }
+  toggle() {
+    this.enabled = !this.enabled;
+    if (this.ready) this.master.gain.setTargetAtTime(this.enabled ? 1 : 0, this.ctx.currentTime, 0.2);
+    return this.enabled;
+  }
+}
+const audio = new AudioSys();
+
+// ===== CONTROLS =====
+const player = { pos: V3(0.4, CFG.eyeH, 20), yaw: 0.06, pitch: -0.01, vel: new THREE.Vector3(), bob: 0 }; // hero shot: alley leading the eye to the cafe glow
+const key = {};
+addEventListener('keydown', e => {
+  key[e.code] = true;
+  if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', e => { key[e.code] = false; });
+
+let locked = false, started = false;
+const hintEl = document.getElementById('hint');
+const crosshair = document.getElementById('crosshair');
+canvas.addEventListener('click', () => {
+  if (!isTouch && started && !locked) { try { canvas.requestPointerLock(); } catch (e) {} }
+});
+document.addEventListener('pointerlockchange', () => {
+  locked = document.pointerLockElement === canvas;
+  crosshair.style.display = locked ? 'block' : 'none';
+  hintEl.style.opacity = locked ? 0 : 1;
+});
+document.addEventListener('mousemove', e => {
+  if (!locked) return;
+  player.yaw -= e.movementX*0.0022;
+  player.pitch = clamp(player.pitch - e.movementY*0.0022, -1.45, 1.45);
+});
+// fallback look for environments where pointer lock is unavailable (embedded browsers): hold and drag
+let dragging = false, dragX = 0, dragY = 0;
+canvas.addEventListener('mousedown', e => { if (!isTouch && started && !locked) { dragging = true; dragX = e.clientX; dragY = e.clientY; } });
+addEventListener('mousemove', e => {
+  if (!dragging || locked) return;
+  player.yaw -= (e.clientX - dragX)*0.0045;
+  player.pitch = clamp(player.pitch - (e.clientY - dragY)*0.0045, -1.45, 1.45);
+  dragX = e.clientX; dragY = e.clientY;
+});
+addEventListener('mouseup', () => { dragging = false; });
+
+// mobile: virtual joystick (move) + drag on right half (look)
+const joy = { x: 0, y: 0 };
+const joyEl = document.getElementById('joy');
+const stickEl = document.getElementById('joyStick');
+let joyId = null;
+function joyUpdate(e) {
+  const t = [...e.changedTouches].find(c => c.identifier === joyId);
+  if (!t) return;
+  const r = joyEl.getBoundingClientRect();
+  let dx = (t.clientX - (r.left + r.width/2))/(r.width/2);
+  let dy = (t.clientY - (r.top + r.height/2))/(r.height/2);
+  const m = Math.hypot(dx, dy);
+  if (m > 1) { dx /= m; dy /= m; }
+  joy.x = dx; joy.y = dy;
+  stickEl.style.transform = 'translate(' + (dx*34) + 'px,' + (dy*34) + 'px)';
+}
+joyEl.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); if (joyId === null) { joyId = e.changedTouches[0].identifier; joyUpdate(e); } }, { passive: false });
+joyEl.addEventListener('touchmove', e => { e.preventDefault(); e.stopPropagation(); joyUpdate(e); }, { passive: false });
+const joyEnd = e => { joyId = null; joy.x = joy.y = 0; stickEl.style.transform = 'translate(0,0)'; };
+joyEl.addEventListener('touchend', joyEnd);
+joyEl.addEventListener('touchcancel', joyEnd);
+let lookId = null, lx = 0, ly = 0;
+app.addEventListener('touchstart', e => {
+  if (!started) return;
+  for (const t of e.changedTouches) {
+    if (t.clientX > innerWidth*0.42 && lookId === null) { lookId = t.identifier; lx = t.clientX; ly = t.clientY; }
+  }
+}, { passive: true });
+app.addEventListener('touchmove', e => {
+  for (const t of e.changedTouches) {
+    if (t.identifier === lookId) {
+      player.yaw -= (t.clientX - lx)*0.0052;
+      player.pitch = clamp(player.pitch - (t.clientY - ly)*0.0052, -1.45, 1.45);
+      lx = t.clientX; ly = t.clientY;
+    }
+  }
+}, { passive: true });
+const lookEnd = e => { for (const t of e.changedTouches) if (t.identifier === lookId) lookId = null; };
+app.addEventListener('touchend', lookEnd);
+app.addEventListener('touchcancel', lookEnd);
+
+function updatePlayer(dt) {
+  const kF = (key.KeyW || key.ArrowUp ? 1 : 0) - (key.KeyS || key.ArrowDown ? 1 : 0);
+  const kR = (key.KeyD || key.ArrowRight ? 1 : 0) - (key.KeyA || key.ArrowLeft ? 1 : 0);
+  let iF = kF - joy.y, iR = kR + joy.x;
+  const mag = Math.hypot(iF, iR);
+  if (mag > 1) { iF /= mag; iR /= mag; }
+  const run = key.ShiftLeft || key.ShiftRight || Math.hypot(joy.x, joy.y) > 0.92;
+  const sp = run ? CFG.runSpeed : CFG.walkSpeed;
+  const sy = Math.sin(player.yaw), cy = Math.cos(player.yaw);
+  const tvx = (iF*(-sy) + iR*cy)*sp;
+  const tvz = (iF*(-cy) + iR*(-sy))*sp;
+  const damp = 1 - Math.exp(-dt*9);
+  player.vel.x += (tvx - player.vel.x)*damp;
+  player.vel.z += (tvz - player.vel.z)*damp;
+  player.pos.x = clamp(player.pos.x + player.vel.x*dt, -2.55, 2.55);
+  player.pos.z = clamp(player.pos.z + player.vel.z*dt, -27, 27);
+  const sp2 = Math.hypot(player.vel.x, player.vel.z);
+  player.bob += dt*(4.0 + sp2*1.9);
+  camera.position.set(player.pos.x, CFG.eyeH + Math.sin(player.bob)*0.028*Math.min(1, sp2/2.5), player.pos.z);
+  camera.rotation.set(player.pitch, player.yaw, 0);
+}
+
+// ===== UI + TRANSITION MANAGER =====
+const TIME_PRESET = {
+  dusk:  { skyTop: C(0x2d1b3d), skyBottom: C(0x5a2b45), fogC: C(0x2a1a30), fogD: 0.030,
+           moonI: 0.62, moonC: C(0x5b6ee1), ambI: 0.42, hemiI: 0.6, hemiC: C(0x4a3560), hemiG: C(0x141018), exposure: 1.28 },
+  night: { skyTop: C(0x10121f), skyBottom: C(0x1c1436), fogC: C(0x0e0e1a), fogD: 0.034,
+           moonI: 0.38, moonC: C(0x7d8cff), ambI: 0.28, hemiI: 0.4, hemiC: C(0x2e2e50), hemiG: C(0x0c0c12), exposure: 1.18 },
+};
+const WEATHER_PRESET = {
+  none:  { rain: 0.0, rainSpeed: 0,  rainLen: 0.3, wind: 0.25, ripple: 0.0, fogMul: 0.7,  audio: { rain: 0,    hiss: 0,    lfo: 0   } },
+  light: { rain: 0.3, rainSpeed: 15, rainLen: 0.25, wind: 0.7,  ripple: 0.55, fogMul: 1.0, audio: { rain: 0.08, hiss: 0.015, lfo: 70  } },
+  heavy: { rain: 1.0, rainSpeed: 25, rainLen: 0.6, wind: 2.4,  ripple: 1.0, fogMul: 1.5,  audio: { rain: 0.25, hiss: 0.06,  lfo: 420 } },
+};
+function mergeParams(tk, wk) {
+  const t = TIME_PRESET[tk], w = WEATHER_PRESET[wk];
+  const skyTop = t.skyTop.clone(), skyBottom = t.skyBottom.clone(), fogC = t.fogC.clone();
+  if (wk === 'heavy') { // storms keep a blue-grey city-glow sky — heavy rain is not a blackout
+    skyTop.lerp(C(0x2a2f4d), 0.4);
+    skyBottom.lerp(C(0x3d4270), 0.45);
+    fogC.lerp(C(0x1c2038), 0.3);
+  }
+  return {
+    skyTop, skyBottom, fogC,
+    fogD: t.fogD*w.fogMul, moonI: t.moonI, moonC: t.moonC.clone(),
+    ambI: t.ambI, hemiI: t.hemiI, hemiC: t.hemiC.clone(), hemiG: t.hemiG.clone(),
+    rain: w.rain, rainSpeed: w.rainSpeed, rainLen: w.rainLen, wind: w.wind, ripple: w.ripple,
+    exposure: t.exposure,
+  };
+}
+const P = mergeParams('dusk', 'light');
+let fromP = null, toP = null, transT = 1;
+let curTime = 'dusk', curWeather = 'light';
+let thunderOn = false, thunderT = 6, flashV = 0;
+function snapshot(p) {
+  const o = {};
+  for (const k in p) o[k] = p[k] instanceof THREE.Color ? p[k].clone() : p[k];
+  return o;
+}
+function lerpInto(dst, a, b, u) {
+  for (const k in dst) {
+    if (a[k] instanceof THREE.Color) dst[k].lerpColors(a[k], b[k], u);
+    else dst[k] = a[k] + (b[k] - a[k])*u;
+  }
+}
+function applyP(p) {
+  skyU.uTop.value.copy(p.skyTop);
+  skyU.uBottom.value.copy(p.skyBottom);
+  scene.fog.color.copy(p.fogC);
+  scene.fog.density = p.fogD;
+  moon.intensity = p.moonI;
+  moon.color.copy(p.moonC);
+  amb.intensity = p.ambI;
+  hemi.intensity = p.hemiI;
+  hemi.color.copy(p.hemiC);
+  hemi.groundColor.copy(p.hemiG);
+  renderer.toneMappingExposure = p.exposure;
+  rain.uniforms.uSpeed.value = p.rainSpeed;
+  rain.uniforms.uLen.value = p.rainLen;
+  rain.uniforms.uWind.value = p.wind;
+  rain.uniforms.uOpacity.value = p.rain <= 0.02 ? 0 : 0.28 + 0.5*p.rain;
+  rain.setCount(RAIN_COUNT*Math.min(1, p.rain*1.2));
+  rain.mesh.visible = p.rain > 0.02;
+  drips.mesh.visible = p.rain > 0.04;
+  drips.uniforms.uOpacity.value = p.rain <= 0.02 ? 0 : p.rain*0.55;
+  puddles.forEach(pu => pu.uni.uRipple.value = p.ripple);
+}
+function setState(tk, wk, instant) {
+  curTime = tk; curWeather = wk;
+  thunderOn = wk === 'heavy';
+  audio.setMix(WEATHER_PRESET[wk].audio, instant);
+  const target = mergeParams(tk, wk);
+  if (instant) {
+    for (const k in P) {
+      if (P[k] instanceof THREE.Color) P[k].copy(target[k]);
+      else P[k] = target[k];
+    }
+    applyP(P);
+    envPending = true;
+    transT = 1;
+    return;
+  }
+  fromP = snapshot(P);
+  toP = target;
+  transT = 0;
+}
+document.querySelectorAll('[data-time]').forEach(b => b.addEventListener('click', () => {
+  if (b.dataset.time === curTime) return;
+  document.querySelectorAll('[data-time]').forEach(x => x.classList.toggle('active', x === b));
+  setState(b.dataset.time, curWeather, false);
+}));
+document.querySelectorAll('[data-weather]').forEach(b => b.addEventListener('click', () => {
+  if (b.dataset.weather === curWeather) return;
+  document.querySelectorAll('[data-weather]').forEach(x => x.classList.toggle('active', x === b));
+  setState(curTime, b.dataset.weather, false);
+}));
+const audioBtn = document.getElementById('audioBtn');
+audioBtn.addEventListener('click', () => {
+  audio.init();
+  const on = audio.toggle();
+  audioBtn.textContent = on ? '🔊 音效开' : '🔇 音效关';
+  audioBtn.classList.toggle('active', !on);
+});
+
+// smooth "back to spawn" — fixes getting lost in the alley
+const SPAWN = { pos: V3(0.4, CFG.eyeH, 20), yaw: 0.06, pitch: -0.01 };
+let resetTween = null;
+document.getElementById('resetBtn').addEventListener('click', () => {
+  const dy = ((SPAWN.yaw - player.yaw + Math.PI) % (2*Math.PI) + 2*Math.PI) % (2*Math.PI) - Math.PI;
+  resetTween = { t: 0, fromP: player.pos.clone(), fromYaw: player.yaw, dy, fromPitch: player.pitch };
+});
+function tickReset(dt) {
+  if (!resetTween) return;
+  resetTween.t = Math.min(1, resetTween.t + dt/1.1);
+  const u = resetTween.t*resetTween.t*(3 - 2*resetTween.t);
+  player.pos.lerpVectors(resetTween.fromP, SPAWN.pos, u);
+  player.yaw = resetTween.fromYaw + resetTween.dy*u;
+  player.pitch = resetTween.fromPitch + (SPAWN.pitch - resetTween.fromPitch)*u;
+  player.vel.set(0, 0, 0);
+  if (resetTween.t >= 1) resetTween = null;
+}
+
+addEventListener('pointerdown', () => { try { audio.init(); } catch (e) {} }, { once: true }); // audio starts on the very first gesture
+const loadingEl = document.getElementById('loading');
+document.getElementById('enterBtn').addEventListener('click', () => {
+  try { audio.init(); } catch (e) {} // audio is optional — entering must never be blocked by it
+  started = true;
+  loadingEl.classList.add('hide');
+  document.getElementById('hud').classList.add('show');
+  if (isTouch) {
+    hintEl.textContent = '左侧摇杆移动 · 右侧滑动控制视角';
+    setTimeout(() => { hintEl.style.opacity = 0; }, 5000);
+  } else {
+    setTimeout(() => { if (!locked) hintEl.style.opacity = 1; }, 100);
+  }
+});
+if (isTouch) document.getElementById('ctrlHint').innerHTML = '移动端：左侧摇杆移动 · 右侧滑动控制视角<br>右下角按钮切换天气 / 时间 / 音效';
+
+// neon flicker state
+const flick = { t: 0.6, on: true };
+function updateNeon(t, dt) {
+  coffeeSign.material.color.setScalar(2.05 + 0.5*Math.sin(t*1.35) + (Math.random() < 0.004 ? -0.8 : 0));
+  ramenSign.material.color.setScalar(2.35 + (Math.random() - 0.5)*0.18);
+  snackSign.material.color.setScalar(2.25 + (Math.random() - 0.5)*0.16);
+  lanternMat.color.copy(LANTERN_BASE).multiplyScalar(2.0 + (Math.random() - 0.5)*0.12);
+  const ph = t % 17;
+  const gOn = ph < 7.5, aOn = !gOn && ph < 9;
+  tlGrn.color.copy(TL_BASE.g).multiplyScalar(gOn ? 2.2 : 0.07);
+  tlAmb.color.copy(TL_BASE.a).multiplyScalar(aOn ? 2.0 : 0.07);
+  tlRed.color.copy(TL_BASE.r).multiplyScalar(!gOn && !aOn ? 2.2 : 0.07);
+  if (gOn) { tlLight.color.set(0x2fe6a0); tlLight.intensity = 2.5; }
+  else if (aOn) { tlLight.color.set(0xffb03b); tlLight.intensity = 2.0; }
+  else { tlLight.color.set(0xff3b30); tlLight.intensity = 2.2; }
+  flick.t -= dt;
+  if (flick.t <= 0) {
+    flick.on = !flick.on;
+    flick.t = flick.on
+      ? (Math.random() < 0.2 ? 0.8 + Math.random()*1.4 : 0.08 + Math.random()*0.5)
+      : 0.05 + Math.random()*0.16;
+  }
+  openMats[1].color.setScalar(flick.on ? 1.6 : 0.1);
+  openMats[0].color.setScalar(1.6);
+  openMats[2].color.setScalar(1.6 + (Math.random() - 0.5)*0.12);
+}
+
+// transition tick extracted from the loop so verification can step it deterministically
+// (the headless guest starves rAF; real browsers run this at frame rate)
+function tickTransitions(dt) {
+  if (transT < 1) {
+    transT = Math.min(1, transT + dt/CFG.transDur);
+    const u = transT*transT*(3 - 2*transT);
+    lerpInto(P, fromP, toP, u);
+    applyP(P);
+    if (transT >= 1) envPending = true;
+  }
+}
+
+// ===== MAIN LOOP =====
+setState('dusk', 'light', true);
+applyP(P);
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
+  tickTransitions(dt);
+  tickReset(dt);
+  updatePlayer(dt);
+  rain.uniforms.uCenter.value.set(camera.position.x, CFG.eyeH, camera.position.z);
+  rain.update(t);
+  drips.update(t);
+  puddles.forEach(p => p.uni.uTime.value = t);
+  updateNeon(t, dt);
+  if (thunderOn && started) {
+    thunderT -= dt;
+    if (thunderT <= 0) {
+      thunderT = 8 + Math.random()*7;
+      audio.thunder();
+      flashV = 0.85 + Math.random()*0.3;
+    }
+  }
+  flashV *= Math.exp(-dt*3.0);
+  renderer.toneMappingExposure = P.exposure * (1 + flashV*0.55); // lightning pops the whole frame
+  hemi.intensity = P.hemiI + flashV*1.6;
+  amb.intensity = P.ambI + flashV*0.8;
+  if (envPending) { envPending = false; captureEnv(); }
+  vignettePass.uniforms.uTime.value = t;
+  composer.render();
+}
+animate();
+window.__dbg = { player, camera, audio, setState, P, updatePlayer, tickTransitions, tickReset,
+  neon: { open: openMats, coffee: coffeeSign.material, ramen: ramenSign.material, lantern: lanternMat } }; // verification hooks
+window.__sceneReady = true;
+
+} catch (err) {
+  console.error(err);
+  const el = document.getElementById('loadErr');
+  el.style.display = 'block';
+  el.textContent = '初始化失败：' + (err && err.message ? err.message : err);
+}
+</script>
+</body>
+</html>
